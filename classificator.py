@@ -5,6 +5,8 @@ from torch import nn, optim
 from torchvision import datasets, transforms, models
 import matplotlib
 import matplotlib.pyplot as plt
+from PIL import Image
+import numpy as np
 
 
 def load_ad_transform_data(data_dir):
@@ -39,12 +41,13 @@ def load_ad_transform_data(data_dir):
     data_iter = iter(testloader)
 
     images, labels = next(data_iter)
-    fig, axes = plt.subplots(figsize=(10,4), ncols=4)
+    fig, axes = plt.subplots(figsize=(10, 4), ncols=4)
     for ii in range(4):
-      ax = axes[ii]
-      print(images[ii].shape)
+        ax = axes[ii]
+        print(images[ii].shape)
 
-    return trainloader, testloader
+    return trainloader, testloader, train_transforms
+
 
 def train_and_test(trainloader, testloader):
     model = models.densenet121(pretrained=True)
@@ -77,7 +80,6 @@ def train_and_test(trainloader, testloader):
 
         outputs = model.forward(inputs)
         loss = criterion(outputs, labels)
-
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -105,14 +107,16 @@ def train_and_test(trainloader, testloader):
 
     # Only train the classifier parameters, feature parameters are frozen
     optimizer = optim.Adam(model.classifier.parameters(), lr=0.003)
+    accuracy = 0
 
-
-    epochs = 2
+    epochs = 1
     steps = 0
     running_loss = 0
     print_every = 5
     for epoch in range(epochs):
         for inputs, labels in trainloader:
+            if accuracy == 1:
+                break
             steps += 1
             # Move input and label tensors to the default device
             inputs, labels = inputs.to(device), labels.to(device)
@@ -127,6 +131,8 @@ def train_and_test(trainloader, testloader):
             running_loss += loss.item()
 
             if steps % print_every == 0:
+                if accuracy == 1:
+                    break
                 test_loss = 0
                 accuracy = 0
                 model.eval()
@@ -147,8 +153,34 @@ def train_and_test(trainloader, testloader):
                 print(f"Epoch {epoch + 1}/{epochs}.. "
                       f"Train loss: {running_loss / print_every:.3f}.. "
                       f"Test loss: {test_loss / len(testloader):.3f}.. "
+                      f"LossF: {test_loss:.3f}.. "
+                      f"accuracyF: {accuracy:.3f}.. "
+                      f"Test loader: {len(testloader):.3f}.. "
                       f"Test accuracy: {accuracy / len(testloader):.3f}")
+
                 running_loss = 0
                 model.train()
 
     return model
+
+
+def pre_image(image_path, model, data_dir, train_transforms):
+    img = Image.open(image_path)
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    transform_norm = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Resize(255), transforms.Normalize(mean, std)])
+    # get normalized image
+    img_normalized = transform_norm(img).float()
+    img_normalized = img_normalized.unsqueeze_(0)
+    # input = Variable(image_tensor)
+    # print(img_normalized.shape)
+    with torch.no_grad():
+        model.eval()
+        output = model(img_normalized)
+        # print(output)
+        index = output.data.cpu().numpy().argmax()
+        train_data = datasets.ImageFolder(data_dir + '/train', transform=train_transforms)
+        classes = train_data.classes
+        class_name = classes[index]
+        return class_name
